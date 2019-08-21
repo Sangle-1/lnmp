@@ -1,0 +1,170 @@
+三、mysql调优
+3.1、mysql体系结构
+由8个功能模块组成：
+管理工具：安装服务软件后，提供的命令mysqldump，mysqlbinlog，mysqladmin
+连接池：当接收到客户端的请求后，检查是否有资源相应客户端的连接请求
+SQL接口：把sql传递给mysql线程处理
+分析器：检查执行的sql命令是否有语法错误，是否有访问权限
+优化器：优化执行的sql命名，以最节省资源的方式执行sql命令
+查询缓存：缓存曾经查找到的记录，查询缓存的存储空间是从物理内存划分出来的，用来存储查询过的查询结果
+存储引擎：是表的处理器，不同的存储引擎有不同的存储功能和数据存储方式
+				Myisam innodb
+文件系统：存储表中记录的磁盘
+
+3.2、mysql服务处理查询请求过程
+数据库服务器接收到查询请求后，先从查询缓存里查找记录，若查询缓存里有查找记录，直接从缓存里提取数据给客户端，
+反之到表里查询记录，把查询的记录先存放到查询缓存里再返回给客户端
+
+
+
+3.3、mysql调优
+3.4、如何优化mysql数据库服务器（哪些原因导致数据库服务器处理客户端的连接请求慢）
+a、硬件的配置低导致处理速度慢 CPU 内存 存储磁盘
+CPU应不低于16核、	内存上G、	存储磁盘上T 转速：15000/s
+uptime		free -m	top -->0.0 wa
+
+b、网络带宽窄  用网络测试软件可以知道
+
+
+c、提供服务的软件版本过低导致性能低下：
+1、查看服务运行时的参数配置
+mysql> show variables;
+mysql> show variables like "%innodb%";
+
+2、常用参数:
+查看并发连接数量
+show variables like "%conn%";
+mysql> show variables like "max_connections%";
++-----------------+-------+
+| Variable_name   | Value |
++-----------------+-------+
+| max_connections | 151   |
++-----------------+-------+
+
+
+修改变量的值
+命令行修改
+set 【global】变量名=值;
+set global  max_connections = 500;
+mysql> show variables like "max_connections%";
+
+永久修改：
+vim /etc/my.cnf
+变量名=值
+
+
+怎样设置才算合理：
+有过的最大连接数/并发连接数约等于0.85的时候才最合理
+Max_used_connections/Max_connections=0.85
+500/x=0.85*100%=85%
+
+查看有过的最大连接数
+show  global status like "%conn%";
+
+
+show global status like "Max_used_connections";
+set global  max_connections=数字；
+flush status  //刷新连接的值（清零）
+mysql> show variables like "max_connections%";
++-----------------+-------+
+| Variable_name   | Value |
++-----------------+-------+
+| max_connections | 152   |
++-----------------+-------+
+
+
+连接超时时间
+show variables like "%timeout%";   //timeout字样的全部列出来
+connect_timeout             | 10  
+//客户端与服务器建立连接时tcp三次握手的超时时间10s
+wait_timeout                | 28800  
+//客户端与服务器建立连接后，等待执行sql命令的超时时间28800s
+
+
+可以恢复使用的线程数量
+线程：thread
+show variables like "%thread%";
+thread_cache_size          | 9   //可以重复使用的线程的数量
+
+所有线程同时打开表的数量
+mysql> show variables like "%table%";
+table_open_cache           | 2000   //默认2000张
+
+
+
+与查询相关参数的配置
+key_buffer-size 索引缓存的大小(默认8M)
+index  primary key  foreign key
+show variables like "key_buffer_size%";
+
+sort_buffer_size：为每个要排序的线程分配此大小的缓存空间
+read_buffer_size：为顺序读取表记录保留的缓存大小
+
+name---> index
+select * from t1 where name="jim"; key_buffer_size
+select * from t1 order by 字段名; sort_buffer_size
+select * from t1; read_buffer_size
+select * from t1 group by 字段名; read_rnd_buffer_size
+
+
+
+与查询缓存相关参数的配置
+mysql> show variables like "query_cache%";
++------------------------------+---------+
+| Variable_name                | Value   |
++------------------------------+---------+
+| query_cache_limit            | 1048576 |  //查询缓存超过这个值默认（1M）就不允许放到缓存里 1048576除以1024
+| query_cache_min_res_unit     | 4096    |  //查询缓存最小存储单元4k 4096除以1024
+| query_cache_size             | 1048576 |	//查询缓存的大小默认（1M）
+| query_cache_type             | OFF     | //查询缓存类型 默认关（off ）
+| query_cache_wlock_invalidate | OFF     | //查询缓存写锁无效是关闭的即写锁是有效的
++------------------------------+---------+
+当对myisam存储引擎的表执行查询时，若检查到有对表做写的sql操作，不从查询缓存里查询数据缓存返回
+给客户端，而是等写操作完成后，重新从表里查找数据返回给客户端
+
+
+查看当前的查询缓存统计状态
+mysql> show global  status like "%qcache%";
+| Qcache_hits             | 0   |  //在查询缓存查找到数据的次数
+| Qcache_inserts          | 0   |  //记录在查询缓存里查找数据的次数
+| Qcache_lowmem_prunes    | 0   |  //清理查询缓存空间刷新的次数，清理一次，它的值加一次
+
+
+
+3、程序员编写的sql查询语句太复杂，导致数据库服务器处理速度慢
+开启数据库服务器的慢查询日志，记录超过指定时间（默认10s）显示查询结果的sql命令
+
+mysql数据库服务日志类型：
+错误日志：默认开启，记录服务在启动和运行过程中产生的错误信息
+log-error=/var/log/mysqld.log
+binlog日志又叫二进制日志
+慢查询日志：记录超过指定时间显示查询结果的sql命令
+查询日志：记录所有sql命令
+vim /etc/my.cnf
+[mysqld]
+general-log
+# systemctl restart mysqld
+
+cat /var/lib/mysql/主机名.log
+cat /var/lib/mysql/db55.log
+
+启用慢查询日志
+# vim /etc/my.cnf
+[mysqld]
+slow-query-log
+slow-query-log-file=db55
+long-query-time=2  //指定超时时间
+log-queries-not-using-indexes  //记录没有使用索引做查询的命令
+# systemctl restart mysqld
+
+查看日志文件内容
+cat /var/lib/mysql/主机名-slow.log
+
+mysql -uroot -p123456
+mysql> select sleep(4);  //休眠4s再查询，日志里会有记录,不超过2s不会记录
+tailf /var/lib/mysql/db55-slow.log
+
+统计慢查询日志文件记录信息
+# mysqldumplow   /var/lib/mysql/db55-slow.log  > /tmp/sql.txt
+
+5、网络架构有问题（有数据传输瓶颈）
